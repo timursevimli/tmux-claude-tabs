@@ -1,0 +1,6 @@
+# Nothing generated belongs in here: scratch files from tooling have snuck in
+# via `git add -A` before.
+*.log
+*.tmp
+*.bak
+.DS_Store
