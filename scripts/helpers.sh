@@ -21,6 +21,23 @@ supervisor_dir() {
 	printf '%s\n' "${CLAUDE_TABS_SUPERVISOR_DIR:-$HOME/.claude/sessions}"
 }
 
+# The session's name from its transcript: the last /rename, else the agent
+# name, else the AI title. Same as transcript_title in hooks/claude-tabs.sh,
+# which sources nothing — keep the two in step.
+transcript_title() { # transcript_title <transcript.jsonl>
+	[ -f "${1:-}" ] || return 0
+	LC_ALL=C grep -a -E '"type":"(custom-title|agent-name|ai-title)"' "$1" 2>/dev/null |
+		LC_ALL=C awk '
+			match($0, /"(customTitle|agentName|aiTitle)":"([^"\\]|\\.)*"/) {
+				s = substr($0, RSTART, RLENGTH); k = s
+				sub(/":".*/, "", k); sub(/^"/, "", k)
+				sub(/^"[A-Za-z]*":"/, "", s); sub(/"$/, "", s)
+				gsub(/\\"/, "\"", s); gsub(/\\\\/, "\\", s)
+				t[k] = s
+			}
+			END { print (t["customTitle"] != "" ? t["customTitle"] : t["agentName"] != "" ? t["agentName"] : t["aiTitle"]) }'
+}
+
 history_spool() {
 	# One file per ended session. Append = create, forget = rm, prune = rm —
 	# every operation is atomic on its own, so unlike the old single-file TSV

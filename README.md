@@ -14,6 +14,10 @@ And on the tab bar, all the time, without opening anything:
 
 ![the tab bar](docs/tabs.png)
 
+Claude windows are named after the session — the name Claude gives it, or
+the one you set with `/rename` — instead of the binary's version (`2_1_302`).
+Windows you named yourself keep their names.
+
 Window 2 is blocked on a permission answer. Window 3 holds three sessions and
 all of them finished while you were away. Window 4 left a background job
 running. Window 1 is the one you are in, and it is running `Bash`.
@@ -100,7 +104,8 @@ idle. ⏳ is not ✅: the session is busy on its own behalf, not waiting for you
 ## The navigator
 
 `prefix N` lists every Claude on the server: what needs you first, then what is
-running, then finished, idle and ended. The list and the preview both refresh
+running, then finished, idle and ended. Each row shows the session's name after
+its directory, and the name is searchable. The list and the preview both refresh
 while it is open.
 
 The preview is a live capture of the selected session's screen; for an ended
@@ -168,6 +173,8 @@ set -g @claude-tabs-jump-key       'J'       # next session needing you
 set -g @claude-tabs-clear-key      'M-c'     # clear the current window's badge
 set -g @claude-tabs-click-menu     'on'      # middle/double-click state menu
 set -g @claude-tabs-current-label  'on'      # "· Bash" next to the current window's badge
+set -g @claude-tabs-window-name    '24'      # name Claude windows after the session, cut to this many cells;
+                                             # 'off' leaves automatic-rename-format alone
 set -g @claude-tabs-auto-hooks     'off'     # wire the Claude Code hooks on tmux start
 set -g @claude-tabs-notify         'on'
 set -g @claude-tabs-notify-states  'wait plan done error'
@@ -243,8 +250,8 @@ is the whole uninstall.
 
 | Where                              | What                                                                                                                                                              | Removed by                   |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| the tmux server                    | badge segments in both window-status formats, a notice segment in `status-right` (whose length it raises to 140 and restores on uninstall), nine hooks (self-heal, pane exit, pane move), the key bindings, one poller process | `claude-tabs.tmux uninstall` |
-| `~/.local/share/tmux-claude-tabs/` | ended-session records, the current turn markers, one menu-row file per attached client, a sync lock; the trace log if you turn it on. Created mode 700 — it lists your project paths                                                                                                            | `rm -r`                      |
+| the tmux server                    | badge segments in both window-status formats, a wrapper around `automatic-rename-format` (yours is kept and restored on uninstall), a notice segment in `status-right` (whose length it raises to 140 and restores on uninstall), nine hooks (self-heal, pane exit, pane move), the key bindings, one poller process | `claude-tabs.tmux uninstall` |
+| `~/.local/share/tmux-claude-tabs/` | ended-session records (with the session's name), the current turn markers, one menu-row file per attached client, a sync lock; the trace log if you turn it on. Created mode 700 — it lists your project paths                                                                                                            | `rm -r`                      |
 | `~/.claude/settings.json`          | **only with `auto-hooks` / `hooks/install.sh`:** the 13 hook entries                                                                                                    | `hooks/install.sh --uninstall`     |
 
 **Trust boundary.** Everything this plugin reads — `~/.claude/sessions/`, its

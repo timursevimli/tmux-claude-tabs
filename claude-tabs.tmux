@@ -17,6 +17,10 @@
 # Options (set before this script runs):
 #   @claude-tabs-current-label  on|off  spell the state out on the current
 #                                       window (default: on)
+#   @claude-tabs-window-name    cells|off  name a Claude window after its
+#                                       session, cut to this many cells (plus
+#                                       "…"), instead of the binary's version
+#                                       (default: 24)
 #   @claude-tabs-click-menu     on|off  middle-click / double-click a tab for a
 #                                       menu with its state (default: on)
 #   @claude-tabs-auto-hooks     on|off  wire the Claude Code hooks on tmux start
@@ -288,6 +292,11 @@ if [ "${1:-}" = uninstall ]; then
 	remove_our_hooks after-select-window after-select-pane client-session-changed \
 		client-attached pane-exited pane-died after-kill-pane \
 		window-layout-changed window-linked window-unlinked
+	case "$(tmux show -gv automatic-rename-format 2>/dev/null)" in
+	*@claude_tabs_saved_arf*)
+		tmux setw -g automatic-rename-format \
+			"$(tmux show -gqv @claude_tabs_saved_arf 2>/dev/null)" 2>/dev/null ;;
+	esac
 	tmux list-panes -a -F '#{pane_id}' 2>/dev/null | while IFS= read -r pn; do
 		for o in $badge_opts; do tmux set -p -t "$pn" -u "$o" 2>/dev/null; done
 	done
@@ -308,7 +317,7 @@ if [ "${1:-}" = uninstall ]; then
 	# the token every tick and exits when it no longer matches.
 	for o in @claude_tabs_synced_at @claude_tabs_notice @claude_tabs_notice_tok \
 		@claude_tabs_jump_cursor @claude_tabs_poll_token @claude_tabs_hooks_at \
-		@claude_tabs_saved_sll @claude_tabs_saved_srl; do
+		@claude_tabs_saved_sll @claude_tabs_saved_srl @claude_tabs_saved_arf; do
 		tmux set -gu "$o" 2>/dev/null
 	done
 	exit 0
@@ -381,6 +390,39 @@ tmux setw -g window-status-format "$(insert_glyph "$(strip_segments "$fmt")" "$g
 fmt="$(tmux show -gv window-status-current-format 2>/dev/null)"
 fmt="$(insert_glyph "$(strip_segments "$fmt")" "$plain_seg")"
 tmux setw -g window-status-current-format "$(insert_label "$fmt")"
+
+# Window names. Claude's process is named after its version, so automatic-rename
+# called every Claude window "2_1_302". Claude puts the session's name in the
+# pane title as "✳ <name>"; a window whose active pane runs Claude is named
+# after that instead. Windows renamed by hand have automatic-rename off and are
+# never touched. The user's own format is kept in an option and referenced
+# through #{E:}, not pasted in: a bare comma in it would split our #{?…}.
+# The regex has no {n} quantifier on purpose — a bare } ends a tmux format.
+arf="$(tmux show -gv automatic-rename-format 2>/dev/null)"
+case "$arf" in
+*@claude_tabs_saved_arf*) ;;   # ours, from an earlier load: keep the saved one
+*) tmux set -g @claude_tabs_saved_arf "$arf" ;;
+esac
+name_w="$(opt @claude-tabs-window-name 24)"
+case "$name_w" in
+'' | *[!0-9]* | 0)
+	case "$arf" in
+	*@claude_tabs_saved_arf*)
+		tmux setw -g automatic-rename-format "$(tmux show -gqv @claude_tabs_saved_arf)" ;;
+	esac
+	;;
+*)
+	# A title is the session's name only when it carries Claude's glyph —
+	# before Claude sets one, the pane title is the hostname or whatever the
+	# shell left there. Then, innermost first: drop the glyph; turn # into _
+	# (tmux before 3.4 keeps it, and #[…] in a window name restyles the tab);
+	# swap . and : for look-alikes, which tmux 3.7 would turn into _ in a
+	# window name ("MEMORY_md"). A literal colon cannot be written inside a
+	# modifier, hence [[.colon.]]. The cut keeps N cells, then adds the "…".
+	g='(✳|✢|✶|✻|✽|·|⠂|⠐)'
+	tmux setw -g automatic-rename-format "#{?#{&&:#{m/r:^([0-9]+[._][0-9]+[._][0-9]+|claude)\$,#{pane_current_command}},#{m/r:^$g ,#{pane_title}}},#{=/$name_w/…:#{s/[[.colon.]]/꞉/:#{s/[.]/․/:#{s/[#]/_/:#{s/^$g //:pane_title}}}}},#{E:@claude_tabs_saved_arf}}"
+	;;
+esac
 
 # Every binding below is re-derived from the options on this load; stale ones
 # from a previous load (a changed key, an option turned off) go first.

@@ -255,6 +255,24 @@ oneline() { # oneline <text>
 	printf '%s' "${s//$'\r'/ }"
 }
 
+# The session's name, read once at the end from its transcript: the last
+# /rename, else the agent name, else the AI title — the same choice Claude
+# makes for the pane title. Duplicated in scripts/helpers.sh: this script
+# sources nothing.
+transcript_title() { # transcript_title <transcript.jsonl>
+	[ -f "${1:-}" ] || return 0
+	LC_ALL=C grep -a -E '"type":"(custom-title|agent-name|ai-title)"' "$1" 2>/dev/null |
+		LC_ALL=C awk '
+			match($0, /"(customTitle|agentName|aiTitle)":"([^"\\]|\\.)*"/) {
+				s = substr($0, RSTART, RLENGTH); k = s
+				sub(/":".*/, "", k); sub(/^"/, "", k)
+				sub(/^"[A-Za-z]*":"/, "", s); sub(/"$/, "", s)
+				gsub(/\\"/, "\"", s); gsub(/\\\\/, "\\", s)
+				t[k] = s
+			}
+			END { print (t["customTitle"] != "" ? t["customTitle"] : t["agentName"] != "" ? t["agentName"] : t["aiTitle"]) }'
+}
+
 # Appends are the only write from this hot path — atomic enough on their own.
 # Rewrites (prune here, forget in the navigator) go through a mkdir lock, so a
 # storm of sessions ending at once cannot lose each other's lines. Resumed
@@ -270,10 +288,11 @@ end)
 		priv_mkdir "$spool"
 		reason="$(field end_reason)"
 		[ -n "$reason" ] || reason="$(field reason)"
-		printf '%s\t%s\t%s\t%s\t%s\n' \
+		tp="$(field transcript_path)"
+		printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
 			"$(date +%s)" "$(oneline "$sid")" "$(oneline "$(field cwd)")" \
-			"$(oneline "${reason:-ended}")" \
-			"$(oneline "$(field transcript_path)")" \
+			"$(oneline "${reason:-ended}")" "$(oneline "$tp")" \
+			"$(oneline "$(transcript_title "$tp")")" \
 			>"$spool/${sid//\//_}" 2>/dev/null
 		# Prune: drop the oldest beyond the limit, and sweep this session's
 		# turn/bg markers plus any marker older than a day (GC for sessions

@@ -1242,8 +1242,8 @@ poll)
 				mc="${cwd//\//-}"; mc="${mc//./-}"
 				tp="$HOME/.claude/projects/$mc/$sid.jsonl"
 				[ -f "$tp" ] || tp="-"
-				printf '%s\t%s\t%s\t%s\t%s\n' "$(date +%s)" "$sid" "$cwd" ended "$tp" \
-					>"$spool/${sid//\//_}" 2>/dev/null
+				printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date +%s)" "$sid" "$cwd" ended "$tp" \
+					"$(transcript_title "$tp")" >"$spool/${sid//\//_}" 2>/dev/null
 			fi
 			# Clear the pane the record named. Sweep handles this too, but it
 			# deliberately refuses to act when NO live session remains — the

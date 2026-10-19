@@ -217,6 +217,15 @@ ck "visible suppressed" "$(tmux show -gqv @claude_tabs_notice)" ""
 env -u TMUX -u TMUX_PANE bash -c 'printf "%s" "{\"session_id\":\"h1\",\"cwd\":\"/tmp\",\"transcript_path\":\"/tmp/x\"}" | XDG_DATA_HOME='"$XDG_DATA_HOME"' '"$REPO"'/hooks/claude-tabs.sh end'
 ck "spool append" "$(ls "$SPOOL" | wc -l | tr -d ' ')" "1"
 "$REPO/scripts/navigator.sh" dispose hist h1 /tmp/x; ck "spool forget" "$(ls "$SPOOL" 2>/dev/null | wc -l | tr -d ' ')" "0"
+# The session's name is captured from the transcript at the end: /rename beats
+# the AI title, and a title quoted inside a message is not a title.
+printf '%s\n' '{"type":"ai-title","aiTitle":"Old title","sessionId":"h2"}' \
+	'{"type":"user","message":"\"type\":\"custom-title\",\"customTitle\":\"FAKE\""}' \
+	'{"type":"custom-title","customTitle":"Мой \"проект\"","sessionId":"h2"}' >/tmp/ct-h2.jsonl
+env -u TMUX -u TMUX_PANE bash -c 'printf "%s" "{\"session_id\":\"h2\",\"cwd\":\"/tmp\",\"transcript_path\":\"/tmp/ct-h2.jsonl\"}" | XDG_DATA_HOME='"$XDG_DATA_HOME"' '"$REPO"'/hooks/claude-tabs.sh end'
+ck "spool records the session name" "$(cut -f6 "$SPOOL/h2")" 'Мой "проект"'
+ck "the ended row shows it" "$(CLAUDE_TABS_PLAIN=1 "$REPO/scripts/agents.sh" | awk -F'\t' '$3=="h2" {print $8}')" '/tmp  Мой "проект"'
+"$REPO/scripts/navigator.sh" dispose hist h2 /tmp/ct-h2.jsonl; rm -f /tmp/ct-h2.jsonl
 # --- supervisor fast path (files without trailing newline, like the real ones)
 # The watcher verifies the process behind a session file is alive, so
 # fixtures need a pid that actually exists. This shell will do.
@@ -246,6 +255,18 @@ printf '%s' "{\"pid\":22222,\"sessionId\":\"sv2\",\"kind\":\"interactive\",\"sta
 rows="$("$REPO/scripts/agents.sh")"
 ck "fast path row for tmux-field session" "$(printf '%s\n' "$rows" | awk -F'\t' -v p="$T" '$2=="live" && $3==p {print $13}')" "busy"
 ck "no-tty session filtered" "$(printf '%s\n' "$rows" | grep -c sv2)" "0"
+# The name column: the pane title without Claude's glyph; before the session
+# has a title, the name from the session file.
+printf '%s' "{\"pid\":$LIVEPID,\"sessionId\":\"sv1\",\"kind\":\"interactive\",\"status\":\"busy\",\"cwd\":\"/tmp/p1\",\"statusUpdatedAt\":$(( $(date +%s) * 1000 )),\"tmux\":\"alpha:@1.$T\",\"name\":\"p1-ab\",\"nameSource\":\"derived\"}" > "/tmp/fakesup/$LIVEPID.json"
+tmux select-pane -t "$T" -T '✳ Fix the login bug'
+ck "a live row shows the pane title" \
+	"$(CLAUDE_TABS_PLAIN=1 "$REPO/scripts/agents.sh" | awk -F'\t' -v p="$T" '$2=="live" && $3==p {print $8}')" "/tmp/p1  Fix the login bug"
+for title in '✳ Claude Code' 'myhost.local' 'Привет мир'; do
+	tmux select-pane -t "$T" -T "$title"
+	ck "a title without Claude's glyph is not a name: $title" \
+		"$(CLAUDE_TABS_PLAIN=1 "$REPO/scripts/agents.sh" | awk -F'\t' -v p="$T" '$2=="live" && $3==p {print $8}')" "/tmp/p1  p1-ab"
+done
+tmux select-pane -t "$T" -T ''
 # The watcher, both directions. It replaced a one-shot `recheck` that could
 # only downgrade done -> bg and had no way back, which is what let an hourglass
 # outlive its background work by an hour and change.
@@ -1538,8 +1559,37 @@ ck "before uninstall: the format is spliced" \
 	"$(tmux show -gv window-status-format 2>/dev/null | grep -o '#{?@claude_tabs_wglyph,' | wc -l | tr -d ' ')" "1"
 ck "before uninstall: our bindings exist" \
 	"$([ "$(tmux list-keys 2>/dev/null | grep -c claude-tabs)" -ge 1 ] && echo yes || echo no)" "yes"
+ck "before uninstall: automatic-rename-format is wrapped once" \
+	"$(tmux show -gv automatic-rename-format | grep -o 'claude_tabs_saved_arf' | wc -l | tr -d ' ')" "1"
+ck "the saved rename format is the user's, not ours" \
+	"$(tmux show -gqv @claude_tabs_saved_arf | grep -c claude_tabs_saved_arf || true)" "0"
+ck "a pane not running Claude keeps its usual name" \
+	"$(tmux display -p -t "$T" '#{E:automatic-rename-format}')" "$(tmux display -p -t "$T" '#{pane_current_command}')"
+# A process tmux sees as `claude`, so the Claude branch of the format is taken.
+# A COPY of a sleep binary: tmux names a symlink or a script after its target
+# or interpreter. macOS kills a copied /bin/sleep, so coreutils' gsleep first.
+mkdir -p /tmp/ct-bin
+for src in "$(type -P gsleep)" "$(type -P sleep)"; do
+	[ -n "$src" ] && cp "$src" /tmp/ct-bin/claude 2>/dev/null &&
+		/tmp/ct-bin/claude 0 2>/dev/null && break
+done
+CLP=$(tmux new-window -d -P -F '#{pane_id}' 'exec /tmp/ct-bin/claude 200')
+sleep 0.5
+if [ "$(tmux display -p -t "$CLP" '#{pane_current_command}')" = claude ]; then
+	tmux select-pane -t "$CLP" -T '✳ Fix: a.md #[fg=red]x'
+	ck "a Claude window is named after its session" \
+		"$(tmux display -p -t "$CLP" '#{E:automatic-rename-format}')" "Fix꞉ a․md _[fg=red]x"
+	tmux select-pane -t "$CLP" -T 'myhost.local'
+	ck "...but not after a title Claude did not set" \
+		"$(tmux display -p -t "$CLP" '#{E:automatic-rename-format}')" "claude"
+else
+	sk "window name: tmux does not see the fixture as claude here"
+fi
+tmux kill-pane -t "$CLP" 2>/dev/null; rm -rf /tmp/ct-bin
 tmux set -g @claude_tabs_poll_token unin-tok
+arf_before="$(tmux show -gqv @claude_tabs_saved_arf)"
 bash "$REPO/claude-tabs.tmux" uninstall >/dev/null 2>&1
+ck "uninstall restores automatic-rename-format" "$(tmux show -gv automatic-rename-format)" "$arf_before"
 ck "uninstall strips the spliced formats" \
 	"$(tmux show -gv window-status-format 2>/dev/null | grep -c claude_tabs || true)" "0"
 ck "uninstall clears the poll token (stops the poller)" \
@@ -2020,8 +2070,8 @@ printf '%s' "{\"session_id\":\"nlsess\",\"cwd\":\"/tmp/a\\nB\\tfake\\t/etc/passw
 	TMUX_PANE=$NLT "$REPO/hooks/claude-tabs.sh" end >/dev/null 2>&1
 ck "spool: a newline in cwd cannot forge a second history row" \
 	"$(cat "$SPOOL"/* 2>/dev/null | grep -c .)" "1"
-ck "spool: and the row still has exactly its five fields" \
-	"$(cat "$SPOOL"/* 2>/dev/null | head -1 | awk -F'\t' '{print NF}')" "5"
+ck "spool: and the row still has exactly its six fields" \
+	"$(cat "$SPOOL"/* 2>/dev/null | head -1 | awk -F'\t' '{print NF}')" "6"
 tmux kill-window -t "$NLT" 2>/dev/null
 
 # --- an unwritable state directory must not silently disable the reconcile.

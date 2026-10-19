@@ -7,6 +7,7 @@
 #
 # Row: rank \t kind \t id \t aux \t cwd \t badge \t where \t dir \
 #      \t state \t src \t emoji \t colour \t agent_status \t status_at
+#   dir is display only: the path, then the session's name.
 #   live: id = pane_id,    aux = pid
 #   lost: id = session_id, aux = pid          (rank 4: below every placed
 #         session, above the ended ones — there is nowhere to jump to)
@@ -225,6 +226,10 @@ if [ "$sup_files" = 1 ]; then
 			*) upd="" ;;
 			esac
 			case "$line" in *'"tmux":"'*) rest="${line#*\"tmux\":\"}"; tmuxf="${rest%%\"*}" ;; *) tmuxf="" ;; esac
+			# The session's name ("rusolv-28", or what /rename set) — only the
+			# fallback for a placed pane, whose title carries the better one.
+			# An escaped quote ends it early; drop the stray backslash.
+			case "$line" in *'"name":"'*) rest="${line#*\"name\":\"}"; name="${rest%%\"*}"; name="${name%\\}" ;; *) name="" ;; esac
 
 			# The supervisor names the pane as "Session:@window.%pane". Pane ids are
 			# per-server — %5 here and %5 on another tmux server are different panes
@@ -337,8 +342,8 @@ if [ "$sup_files" = 1 ]; then
 			# enough to suppress every reconcile arm.
 			age=-1
 			if upd_s="$(epoch_ms "$upd")"; then age="$upd_s"; fi
-			printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n' \
-				"$tag" "$pane" "$pid" "$status" "${cwd:--}" "$where" "$sid" "$age"
+			printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n' \
+				"$tag" "$pane" "$pid" "$status" "${cwd:--}" "$where" "$sid" "$age" "${name:--}"
 		done
 	}
 	live_base="$(_collect_live)"
@@ -354,7 +359,7 @@ if [ -z "$live_base" ] && command -v claude >/dev/null 2>&1 && command -v jq >/d
 	# for forks: build a tty→pane index once, then look each session up in it.
 	rows="$(claude agents --json 2>/dev/null |
 		jq -r '.[] | select(.kind == "interactive") |
-			[.pid, (.status // "?"), .sessionId, .cwd] | @tsv' 2>/dev/null)" || rows=""
+			[.pid, (.status // "?"), .sessionId, .cwd, (.name // "-")] | @tsv' 2>/dev/null)" || rows=""
 	if [ -n "$rows" ]; then
 		# " tty|pane|where tty|pane|where ... " — a flat string beats an
 		# associative array, which stock macOS bash 3.2 does not have.
@@ -363,16 +368,16 @@ if [ -z "$live_base" ] && command -v claude >/dev/null 2>&1 && command -v jq >/d
 			sed 's|^/dev/||' | tr '\n' ' ') "
 		pid_ttys="$(ps -Ao pid=,tty= 2>/dev/null)"
 		_collect_legacy() {
-			printf '%s\n' "$rows" | while IFS="$T" read -r pid status sid cwd; do
+			printf '%s\n' "$rows" | while IFS="$T" read -r pid status sid cwd name; do
 				[ -n "$pid" ] || continue
 				tty="$(printf '%s\n' "$pid_ttys" | awk -v p="$pid" '$1 == p { print $2; exit }')"
 				[ -n "$tty" ] && [ "$tty" != "??" ] || continue
 				entry="${pane_index##* $tty|}"
 				[ "$entry" != "$pane_index" ] || continue   # this Claude is not in tmux
 				entry="${entry%% *}"
-				printf 'B\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n' \
+				printf 'B\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n' \
 					"${entry%%|*}" "$pid" "$status" "${cwd:--}" \
-					"${entry##*|}" "$sid" -1
+					"${entry##*|}" "$sid" -1 "${name:--}"
 			done
 		}
 		live_base="$(_collect_legacy)"
@@ -447,6 +452,7 @@ if [ -n "$live_base" ]; then
 			show -pqv -t "$pane" @claude_tabs_label ";"
 			display-message -p "#=E" ";"
 			show -pqv -t "$pane" @claude_tabs_plain ";"
+			display-message -p -t "$pane" "#=T#{pane_title}" ";"
 			display-message -p "#=X"
 		)
 		opt_args+=(";")
@@ -482,6 +488,9 @@ if [ -n "$live_base" ]; then
 		/^#=P/ { cp = substr($0, 4); sect = "s"; next }
 		/^#=L/ { sect = "l"; next }
 		/^#=E/ { sect = "e"; next }
+		# The title rides on its own sentinel line: any program in the pane
+		# can set a title, so it must never be read as a section marker.
+		/^#=T/ { if (cp != "") ti[cp] = substr($0, 4); next }
 		/^#=X/ { sect = ""; cp = ""; next }
 		$1 != "B" && $1 != "U" && cp != "" {
 			if      (sect == "s") st[cp] = $0
@@ -492,6 +501,14 @@ if [ -n "$live_base" ]; then
 		$1 == "B" || $1 == "U" {
 			p = $2; pid = $3; status = $4; cwd = $5; where = $6; age = $8
 			state = st[p]; label = lb[p]; e = em[p]
+			# Claude titles its pane "✳ <session name>" — the name the
+			# session is known by. Only a title carrying the glyph comes
+			# from Claude (before that it is the hostname, or a shell title);
+			# same glyph set as the window name in claude-tabs.tmux. Else,
+			# and for an unplaced row (no pane), the name from the session file.
+			nm = ti[p]
+			if (!sub(/^(✳|✢|✶|✻|✽|·|⠂|⠐) /, "", nm) || nm == "Claude Code")
+				nm = ($9 == "-" ? "" : $9)
 			src = (state == "") ? "f" : "h"
 			if (state == "") {
 				# Session predates the hooks — fall back to the supervisor
@@ -529,6 +546,7 @@ if [ -n "$live_base" ]; then
 
 			path = cwd
 			if (index(path, home) == 1) path = "~" substr(path, length(home) + 1)
+			if (nm != "") path = path "  " (plain != "" ? nm : "\033[1m" nm "\033[0m")
 
 			# Last-activity age for display. `age` is an absolute timestamp and
 			# must stay one — it is also the freshness column downstream, so
@@ -618,7 +636,7 @@ shown="$(get_tmux_option @claude-tabs-history-shown 15)"
 		}
 	BEGIN { n = split(live, ls, " "); for (i = 1; i <= n; i++) if (ls[i] != "") alive[ls[i]] = 1 }
 	{
-		ts = $1; sid = $2; cwd = $3; reason = $4; tp = $5
+		ts = $1; sid = $2; cwd = $3; reason = $4; tp = $5; nm = $6
 		if (out >= max) next
 		if (sid == "" || (sid in alive) || (sid in seen)) next
 		seen[sid] = 1
@@ -639,6 +657,9 @@ shown="$(get_tmux_option @claude-tabs-history-shown 15)"
 
 		path = cwd
 		if (index(path, home) == 1) path = "~" substr(path, length(home) + 1)
+		# The name captured at the end (field 6); rows written before it
+		# existed have none.
+		if (nm != "") path = path "  " nm
 
 		# "⏹" is U+23F9, East_Asian_Width N — ONE cell, unlike every badge
 		# emoji, which are two. Counting it as two padded these rows a cell
