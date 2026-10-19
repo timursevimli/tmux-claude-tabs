@@ -102,6 +102,20 @@ opt() { # opt <name> <default>
 	[ -n "$v" ] && printf '%s' "$v" || printf '%s' "$2"
 }
 
+# tmux re-runs automatic-rename only when a pane prints something, so after a
+# change to automatic-rename-format an idle Claude window kept its old name
+# until its next output. Setting the option re-runs it now. Only windows that
+# inherit it: the value is set on the window and removed again, so a window
+# with its own setting (renamed by hand: off) is never touched.
+rename_now() {
+	tmux list-windows -a -F '#{window_id} #{automatic-rename}' 2>/dev/null |
+		while read -r w on; do
+			[ "$on" = 1 ] && [ -z "$(tmux show -wqv -t "$w" automatic-rename 2>/dev/null)" ] || continue
+			tmux set -w -t "$w" automatic-rename on \; set -wu -t "$w" automatic-rename 2>/dev/null
+		done
+	return 0
+}
+
 # Any key whose binding points into this plugin is ours to manage, and is
 # re-derived from the options on every load. Without this, changing
 # @claude-tabs-nav-key left the old key bound forever, and 'off' never
@@ -295,7 +309,8 @@ if [ "${1:-}" = uninstall ]; then
 	case "$(tmux show -gv automatic-rename-format 2>/dev/null)" in
 	*@claude_tabs_saved_arf*)
 		tmux setw -g automatic-rename-format \
-			"$(tmux show -gqv @claude_tabs_saved_arf 2>/dev/null)" 2>/dev/null ;;
+			"$(tmux show -gqv @claude_tabs_saved_arf 2>/dev/null)" 2>/dev/null
+		rename_now ;;
 	esac
 	tmux list-panes -a -F '#{pane_id}' 2>/dev/null | while IFS= read -r pn; do
 		for o in $badge_opts; do tmux set -p -t "$pn" -u "$o" 2>/dev/null; done
@@ -423,6 +438,7 @@ case "$name_w" in
 	tmux setw -g automatic-rename-format "#{?#{&&:#{m/r:^([0-9]+[._][0-9]+[._][0-9]+|claude)\$,#{pane_current_command}},#{m/r:^$g ,#{pane_title}}},#{=/$name_w/…:#{s/[[.colon.]]/꞉/:#{s/[.]/․/:#{s/[#]/_/:#{s/^$g //:pane_title}}}}},#{E:@claude_tabs_saved_arf}}"
 	;;
 esac
+rename_now
 
 # Every binding below is re-derived from the options on this load; stale ones
 # from a previous load (a changed key, an option turned off) go first.

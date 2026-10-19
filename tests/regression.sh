@@ -1579,6 +1579,14 @@ if [ "$(tmux display -p -t "$CLP" '#{pane_current_command}')" = claude ]; then
 	tmux select-pane -t "$CLP" -T '✳ Fix: a.md #[fg=red]x'
 	ck "a Claude window is named after its session" \
 		"$(tmux display -p -t "$CLP" '#{E:automatic-rename-format}')" "Fix꞉ a․md _[fg=red]x"
+	# The pane prints nothing, so only the load itself can apply the name.
+	MAN=$(tmux new-window -d -P -F '#{pane_id}' -n mine 'sleep 200')
+	bash "$REPO/claude-tabs.tmux" >/dev/null 2>&1
+	ck "a load names an idle Claude window at once" \
+		"$(tmux display -p -t "$CLP" '#{window_name}')" "Fix꞉ a․md _[fg=red]x"
+	ck "...and leaves a hand-named window alone" \
+		"$(tmux display -p -t "$MAN" '#{window_name}/#{automatic-rename}')/$(tmux show -wqv -t "$MAN" automatic-rename)" "mine/0/off"
+	tmux kill-pane -t "$MAN" 2>/dev/null
 	tmux select-pane -t "$CLP" -T 'myhost.local'
 	ck "...but not after a title Claude did not set" \
 		"$(tmux display -p -t "$CLP" '#{E:automatic-rename-format}')" "claude"
