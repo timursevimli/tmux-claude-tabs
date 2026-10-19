@@ -72,6 +72,8 @@ repo="$(dirname "$self")"
 # quotes; a single quote in the install path is not supported.
 self_q="'${self//"#"/"##"}'"
 nav_q="'${repo//"#"/"##"}/scripts/navigator.sh'"
+# shellcheck source=scripts/helpers.sh
+. "$repo/scripts/helpers.sh"
 
 # Pane-scoped badge values plus the window-only display copies (see the
 # segments below for why those exist).
@@ -100,20 +102,6 @@ opt() { # opt <name> <default>
 	local v
 	v="$(tmux show -gqv "$1" 2>/dev/null)"
 	[ -n "$v" ] && printf '%s' "$v" || printf '%s' "$2"
-}
-
-# tmux re-runs automatic-rename only when a pane prints something, so after a
-# change to automatic-rename-format an idle Claude window kept its old name
-# until its next output. Setting the option re-runs it now. Only windows that
-# inherit it: the value is set on the window and removed again, so a window
-# with its own setting (renamed by hand: off) is never touched.
-rename_now() {
-	tmux list-windows -a -F '#{window_id} #{automatic-rename}' 2>/dev/null |
-		while read -r w on; do
-			[ "$on" = 1 ] && [ -z "$(tmux show -wqv -t "$w" automatic-rename 2>/dev/null)" ] || continue
-			tmux set -w -t "$w" automatic-rename on \; set -wu -t "$w" automatic-rename 2>/dev/null
-		done
-	return 0
 }
 
 # Any key whose binding points into this plugin is ours to manage, and is
@@ -310,10 +298,10 @@ if [ "${1:-}" = uninstall ]; then
 	*@claude_tabs_saved_arf*)
 		tmux setw -g automatic-rename-format \
 			"$(tmux show -gqv @claude_tabs_saved_arf 2>/dev/null)" 2>/dev/null
-		rename_now ;;
+		rename_windows ;;
 	esac
 	tmux list-panes -a -F '#{pane_id}' 2>/dev/null | while IFS= read -r pn; do
-		for o in $badge_opts; do tmux set -p -t "$pn" -u "$o" 2>/dev/null; done
+		for o in $badge_opts @claude_tabs_sname; do tmux set -p -t "$pn" -u "$o" 2>/dev/null; done
 	done
 	tmux list-windows -a -F '#{window_id}' 2>/dev/null | while IFS= read -r wn; do
 		for o in $badge_opts; do tmux set -w -t "$wn" -u "$o" 2>/dev/null; done
@@ -427,18 +415,21 @@ case "$name_w" in
 	esac
 	;;
 *)
-	# A title is the session's name only when it carries Claude's glyph —
-	# before Claude sets one, the pane title is the hostname or whatever the
-	# shell left there. Then, innermost first: drop the glyph; turn # into _
+	# The short session name ("rusolv-28", or what /rename set) that sync
+	# publishes on the pane as @claude_tabs_sname — the long pane title made
+	# nine tabs too wide for one screen. Without it (no poller yet, or poll
+	# off), the pane title, but only one carrying Claude's glyph: before
+	# Claude sets one, the pane title is the hostname or whatever the shell
+	# left there. Then, innermost first: drop the glyph; turn # into _
 	# (tmux before 3.4 keeps it, and #[…] in a window name restyles the tab);
 	# swap . and : for look-alikes, which tmux 3.7 would turn into _ in a
 	# window name ("MEMORY_md"). A literal colon cannot be written inside a
 	# modifier, hence [[.colon.]]. The cut keeps N cells, then adds the "…".
 	g='(✳|✢|✶|✻|✽|·|⠂|⠐)'
-	tmux setw -g automatic-rename-format "#{?#{&&:#{m/r:^([0-9]+[._][0-9]+[._][0-9]+|claude)\$,#{pane_current_command}},#{m/r:^$g ,#{pane_title}}},#{=/$name_w/…:#{s/[[.colon.]]/꞉/:#{s/[.]/․/:#{s/[#]/_/:#{s/^$g //:pane_title}}}}},#{E:@claude_tabs_saved_arf}}"
+	tmux setw -g automatic-rename-format "#{?#{&&:#{m/r:^([0-9]+[._][0-9]+[._][0-9]+|claude)\$,#{pane_current_command}},#{||:#{@claude_tabs_sname},#{m/r:^$g ,#{pane_title}}}},#{=/$name_w/…:#{s/[[.colon.]]/꞉/:#{s/[.]/․/:#{s/[#]/_/:#{?@claude_tabs_sname,#{@claude_tabs_sname},#{s/^$g //:pane_title}}}}}},#{E:@claude_tabs_saved_arf}}"
 	;;
 esac
-rename_now
+rename_windows
 
 # Every binding below is re-derived from the options on this load; stale ones
 # from a previous load (a changed key, an option turned off) go first.

@@ -6,8 +6,9 @@
 #   hist  a session that ended (SessionEnd hook) and can be resumed
 #
 # Row: rank \t kind \t id \t aux \t cwd \t badge \t where \t dir \
-#      \t state \t src \t emoji \t colour \t agent_status \t status_at
-#   dir is display only: the path, then the session's name.
+#      \t state \t src \t emoji \t colour \t agent_status \t status_at \t sname
+#   dir is display only: the path, then the session's names.
+#   sname: the short session name ("rusolv-28"), live rows only, else "-".
 #   live: id = pane_id,    aux = pid
 #   lost: id = session_id, aux = pid          (rank 4: below every placed
 #         session, above the ended ones — there is nowhere to jump to)
@@ -323,6 +324,8 @@ if [ "$sup_files" = 1 ]; then
 			fi
 
 			if [ "$kind" = b ]; then
+				# Its name is the task's, not the session you know the pane by.
+				name=""
 				# A background task is not "your turn is being processed", so it
 				# never shows the working glyph. "shell" is the state this plugin
 				# already means by "something is running that is not your turn",
@@ -419,6 +422,10 @@ if [ -n "$live_base" ]; then
 		}
 		{
 			p = $2; r = rank($4); a = ($8 < 0 ? 2147483647 : $8)
+			# The winning record names the pane — unless it is a bg task
+			# (name "-"), which outranks the idle session it belongs to; then
+			# the first session record that has a name.
+			if ($9 != "-" && !(p in nm)) nm[p] = $9
 			if (!(p in seen)) { order[++n] = p; seen[p] = 1 }
 			# On a rank tie keep the FRESHEST record. This read `a >= ba[p]`,
 			# so it skipped the newer one and kept the older; that stale
@@ -428,7 +435,13 @@ if [ -n "$live_base" ]; then
 			else if (r > br[p] || (r == br[p] && a <= ba[p])) next
 			best[p] = $0; br[p] = r; ba[p] = a
 		}
-		END { for (i = 1; i <= n; i++) print best[order[i]] }
+		END {
+			for (i = 1; i <= n; i++) {
+				p = order[i]; row = best[p]
+				if (row ~ /\t-$/ && (p in nm)) { sub(/\t[^\t]*$/, "", row); row = row "\t" nm[p] }
+				print row
+			}
+		}
 	')"
 fi
 
@@ -501,14 +514,17 @@ if [ -n "$live_base" ]; then
 		$1 == "B" || $1 == "U" {
 			p = $2; pid = $3; status = $4; cwd = $5; where = $6; age = $8
 			state = st[p]; label = lb[p]; e = em[p]
-			# Claude titles its pane "✳ <session name>" — the name the
-			# session is known by. Only a title carrying the glyph comes
-			# from Claude (before that it is the hostname, or a shell title);
-			# same glyph set as the window name in claude-tabs.tmux. Else,
-			# and for an unplaced row (no pane), the name from the session file.
-			nm = ti[p]
-			if (!sub(/^(✳|✢|✶|✻|✽|·|⠂|⠐) /, "", nm) || nm == "Claude Code")
-				nm = ($9 == "-" ? "" : $9)
+			# Two names. sn: the short one from the session file
+			# ("rusolv-28", or what /rename set) — what the tab shows. tt:
+			# the title Claude puts on its pane, "✳ <what it is about>". Only
+			# a title carrying the glyph comes from Claude (before that it is
+			# the hostname, or a shell title); same glyph set as the window
+			# name in claude-tabs.tmux.
+			sn = ($9 == "-" ? "" : $9)
+			tt = ti[p]
+			if (!sub(/^(✳|✢|✶|✻|✽|·|⠂|⠐) /, "", tt) || tt == "Claude Code") tt = ""
+			nm = (sn == "" || plain != "") ? sn : "\033[1m" sn "\033[0m"
+			if (tt != "" && tt != sn) nm = (nm == "" ? tt : nm "  " tt)
 			src = (state == "") ? "f" : "h"
 			if (state == "") {
 				# Session predates the hooks — fall back to the supervisor
@@ -546,7 +562,7 @@ if [ -n "$live_base" ]; then
 
 			path = cwd
 			if (index(path, home) == 1) path = "~" substr(path, length(home) + 1)
-			if (nm != "") path = path "  " (plain != "" ? nm : "\033[1m" nm "\033[0m")
+			if (nm != "") path = path "  " nm
 
 			# Last-activity age for display. `age` is an absolute timestamp and
 			# must stay one — it is also the freshness column downstream, so
@@ -580,14 +596,14 @@ if [ -n "$live_base" ]; then
 				# only clue left to where the session went.
 				w = "unplaced " where
 				w = pad(w, cw(w), 17)
-				printf "4\tlost\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+				printf "4\tlost\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t-\n",
 					$7, pid, cwd, badge, w, path, state, src, e, c,
 					(status == "" ? "-" : status), (age < 0 ? "-" : age)
 				next
 			}
-			printf "%d\tlive\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+			printf "%d\tlive\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
 				r, p, pid, cwd, badge, w, path, state, src, e, c, (status == "" ? "-" : status),
-				(age < 0 ? "-" : age)
+				(age < 0 ? "-" : age), (sn == "" ? "-" : sn)
 		}
 	# Freshest first inside a rank. Without the second key the order within a
 	# group was whatever sort happened to produce, so six identical-looking
@@ -666,10 +682,10 @@ shown="$(get_tmux_option @claude-tabs-history-shown 15)"
 		# short and left the ended block visibly out of line with the live one.
 		agecol = pad(a " ago", cw(a) + 4, 17)
 		if (plain != "")
-			printf "5\thist\t%s\t%s\t%s\t%s\t%s\t%s\tended\t-\t-\t0\t-\t-\n",
+			printf "5\thist\t%s\t%s\t%s\t%s\t%s\t%s\tended\t-\t-\t0\t-\t-\t-\n",
 				sid, tp, cwd, pad("⏹ " reason, 2 + cw(reason), 19), agecol, path
 		else
-			printf "5\thist\t%s\t%s\t%s\t%s\t%s\t\033[90m%s\033[0m\tended\t-\t-\t0\t-\t-\n",
+			printf "5\thist\t%s\t%s\t%s\t%s\t%s\t\033[90m%s\033[0m\tended\t-\t-\t0\t-\t-\t-\n",
 				sid, tp, cwd,
 				pad("⏹ \033[90m" reason "\033[0m", 2 + cw(reason), 19),
 				pad("\033[90m" a " ago\033[0m", cw(a) + 4, 17), path

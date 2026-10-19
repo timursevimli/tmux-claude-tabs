@@ -122,3 +122,21 @@ trace_line() { # trace_line <source> <what>
 		"${TMUX_PANE:-none}" "$2" >>"$_td/trace.log" 2>/dev/null
 	return 0
 }
+
+# tmux re-runs automatic-rename only when a pane prints something, so an idle
+# Claude window kept its old name after the format or its session name
+# changed. Setting the option re-runs it now. Only windows that inherit it:
+# the value is set on the window and removed again, so a window with its own
+# setting (renamed by hand: off) is never touched.
+rename_windows() { # rename_windows [pane-or-window...] — none: every window
+	local w on
+	if [ "$#" -eq 0 ]; then
+		set -- $(tmux list-windows -a -F '#{window_id}' 2>/dev/null)
+	fi
+	for w in "$@"; do
+		on="$(tmux display -p -t "$w" '#{automatic-rename}' 2>/dev/null)"
+		[ "$on" = 1 ] && [ -z "$(tmux show -wqv -t "$w" automatic-rename 2>/dev/null)" ] || continue
+		tmux set -w -t "$w" automatic-rename on \; set -wu -t "$w" automatic-rename 2>/dev/null
+	done
+	return 0
+}

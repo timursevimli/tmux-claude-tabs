@@ -852,7 +852,35 @@ sync)
 			exit 0
 		fi
 	fi
-	"$DIR/agents.sh" 2>/dev/null | while IFS="$T" read -r _rank kind pane _pid _cwd _badge _where _dir state src emoji colour agent_status sup_age; do
+	rows="$("$DIR/agents.sh" 2>/dev/null)"
+	# The short session name ("rusolv-28") on each Claude pane, which the
+	# window name reads — tmux cannot read the session files itself. One
+	# list-panes for what is there now; only a pane whose name changed is
+	# written, and its window renamed at once (an idle pane prints nothing,
+	# and tmux re-runs automatic-rename only on output).
+	{
+		tmux list-panes -a -F "#{pane_id}$T#{@claude_tabs_sname}" 2>/dev/null
+		printf '#=rows\n%s\n' "$rows"
+	} | awk -F'\t' '
+		$0 == "#=rows" { r = 1; next }
+		!r { cur[$1] = $2; have[$1] = 1; next }
+		$2 == "live" && ($3 in have) {
+			live[$3] = 1
+			n = ($15 == "-" ? "" : $15); if (cur[$3] != n) print $3 "\t" n
+		}
+		# A pane whose session is gone loses the name too: `claude doctor`,
+		# `claude -p` or a Claude started under another config dir would
+		# otherwise carry the old session name on the tab.
+		END { for (p in cur) if (cur[p] != "" && !(p in live)) print p "\t" }
+	' | while IFS="$T" read -r pane sname; do
+		if [ -n "$sname" ]; then
+			tmux set -p -t "$pane" @claude_tabs_sname "$sname" 2>/dev/null
+		else
+			tmux set -p -t "$pane" -u @claude_tabs_sname 2>/dev/null
+		fi
+		rename_windows "$pane"
+	done
+	printf '%s\n' "$rows" | while IFS="$T" read -r _rank kind pane _pid _cwd _badge _where _dir state src emoji colour agent_status sup_age _sname; do
 		[ "$kind" = live ] || continue
 		[ -n "$pane" ] && [ -n "$state" ] || continue
 		# What the pane's own badge said when the snapshot was taken, compared
@@ -1146,11 +1174,11 @@ poll)
 	}
 	_poll_snap() {
 		# One line per live session into $snap_out: pid|kind|status|sid|cwd|
-		# tmuxfield. Sets a variable instead of printing — capturing with $( )
+		# tmuxfield|name. Sets a variable instead of printing — capturing with $( )
 		# would fork a subshell on every tick, and the quiet tick is the case
 		# this whole verb is optimised for. Same liveness rule as agents.sh —
 		# a lingering file for a dead pid is not a session.
-		local f line pid kind status sid cwd tmuxf
+		local f line pid kind status sid cwd tmuxf nm
 		snap_out=""
 		# One process table per tick, never one cached across ticks — see
 		# same_pid_ok. Costs a `ps` only on a tick that has a record to check.
@@ -1218,7 +1246,11 @@ poll)
 			case "$line" in *'"cwd":"'*) cwd="${line#*\"cwd\":\"}"; cwd="${cwd%%\"*}" ;; esac
 			tmuxf=""
 			case "$line" in *'"tmux":"'*) tmuxf="${line#*\"tmux\":\"}"; tmuxf="${tmuxf%%\"*}" ;; esac
-			snap_out="$snap_out$pid|$kind|$status|$sid|$cwd|$tmuxf
+			# The name too, last: a /rename has to reach the tab, and only a
+			# changed snapshot runs the pass that publishes it.
+			nm=""
+			case "$line" in *'"name":"'*) nm="${line#*\"name\":\"}"; nm="${nm%%\"*}" ;; esac
+			snap_out="$snap_out$pid|$kind|$status|$sid|$cwd|$tmuxf|$nm
 "
 		done
 	}
@@ -1229,7 +1261,7 @@ poll)
 		# wins when both exist: it knows the reason and the transcript.
 		local spool pid kind status sid cwd tmuxf mc tp pane here o limit n f
 		spool="$(history_spool)"
-		printf '%s\n' "$1" | while IFS='|' read -r pid kind status sid cwd tmuxf; do
+		printf '%s\n' "$1" | while IFS='|' read -r pid kind status sid cwd tmuxf _nm; do
 			[ "$kind" = i ] && [ -n "$sid" ] || continue
 			case "$2" in *"|$sid|"*) continue ;; esac   # alive (a resume keeps the sid)
 			# Its record failed to parse this tick rather than going away.

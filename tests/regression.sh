@@ -259,8 +259,14 @@ ck "no-tty session filtered" "$(printf '%s\n' "$rows" | grep -c sv2)" "0"
 # has a title, the name from the session file.
 printf '%s' "{\"pid\":$LIVEPID,\"sessionId\":\"sv1\",\"kind\":\"interactive\",\"status\":\"busy\",\"cwd\":\"/tmp/p1\",\"statusUpdatedAt\":$(( $(date +%s) * 1000 )),\"tmux\":\"alpha:@1.$T\",\"name\":\"p1-ab\",\"nameSource\":\"derived\"}" > "/tmp/fakesup/$LIVEPID.json"
 tmux select-pane -t "$T" -T '✳ Fix the login bug'
-ck "a live row shows the pane title" \
-	"$(CLAUDE_TABS_PLAIN=1 "$REPO/scripts/agents.sh" | awk -F'\t' -v p="$T" '$2=="live" && $3==p {print $8}')" "/tmp/p1  Fix the login bug"
+ck "a live row shows the short name, then the pane title" \
+	"$(CLAUDE_TABS_PLAIN=1 "$REPO/scripts/agents.sh" | awk -F'\t' -v p="$T" '$2=="live" && $3==p {print $8 "|" $15}')" "/tmp/p1  p1-ab  Fix the login bug|p1-ab"
+"$REPO/scripts/navigator.sh" sync force >/dev/null 2>&1
+ck "sync publishes the short name on the pane" "$(tmux show -pqv -t "$T" @claude_tabs_sname)" "p1-ab"
+mv "/tmp/fakesup/$LIVEPID.json" /tmp/ct-held.json
+"$REPO/scripts/navigator.sh" sync force >/dev/null 2>&1
+ck "...and takes it back when the session is gone" "$(tmux show -pqv -t "$T" @claude_tabs_sname)" ""
+mv /tmp/ct-held.json "/tmp/fakesup/$LIVEPID.json"
 for title in '✳ Claude Code' 'myhost.local' 'Привет мир'; do
 	tmux select-pane -t "$T" -T "$title"
 	ck "a title without Claude's glyph is not a name: $title" \
@@ -1579,6 +1585,10 @@ if [ "$(tmux display -p -t "$CLP" '#{pane_current_command}')" = claude ]; then
 	tmux select-pane -t "$CLP" -T '✳ Fix: a.md #[fg=red]x'
 	ck "a Claude window is named after its session" \
 		"$(tmux display -p -t "$CLP" '#{E:automatic-rename-format}')" "Fix꞉ a․md _[fg=red]x"
+	tmux set -p -t "$CLP" @claude_tabs_sname 'proj-1f'
+	ck "...by its short name when sync has published one" \
+		"$(tmux display -p -t "$CLP" '#{E:automatic-rename-format}')" "proj-1f"
+	tmux set -p -t "$CLP" -u @claude_tabs_sname
 	# The pane prints nothing, so only the load itself can apply the name.
 	MAN=$(tmux new-window -d -P -F '#{pane_id}' -n mine 'sleep 200')
 	bash "$REPO/claude-tabs.tmux" >/dev/null 2>&1

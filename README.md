@@ -14,9 +14,9 @@ And on the tab bar, all the time, without opening anything:
 
 ![the tab bar](docs/tabs.png)
 
-Claude windows are named after the session — the name Claude gives it, or
-the one you set with `/rename` — instead of the binary's version (`2_1_302`).
-Windows you named yourself keep their names.
+Claude windows are named after the session's short name — `rusolv-28`, the
+one `claude agents` lists, or what you set with `/rename` — instead of the
+binary's version (`2_1_302`). Windows you named yourself keep their names.
 
 Window 2 is blocked on a permission answer. Window 3 holds three sessions and
 all of them finished while you were away. Window 4 left a background job
@@ -104,8 +104,8 @@ idle. ⏳ is not ✅: the session is busy on its own behalf, not waiting for you
 ## The navigator
 
 `prefix N` lists every Claude on the server: what needs you first, then what is
-running, then finished, idle and ended. Each row shows the session's name after
-its directory, and the name is searchable. The list and the preview both refresh
+running, then finished, idle and ended. Each row shows the session's short name
+(the one on its tab) and what it is about after its directory, both searchable. The list and the preview both refresh
 while it is open.
 
 The preview is a live capture of the selected session's screen; for an ended
@@ -173,7 +173,7 @@ set -g @claude-tabs-jump-key       'J'       # next session needing you
 set -g @claude-tabs-clear-key      'M-c'     # clear the current window's badge
 set -g @claude-tabs-click-menu     'on'      # middle/double-click state menu
 set -g @claude-tabs-current-label  'on'      # "· Bash" next to the current window's badge
-set -g @claude-tabs-window-name    '24'      # name Claude windows after the session, cut to this many cells;
+set -g @claude-tabs-window-name    '24'      # name Claude windows after the session (rusolv-28), cut to this many cells;
                                              # 'off' leaves automatic-rename-format alone
 set -g @claude-tabs-auto-hooks     'off'     # wire the Claude Code hooks on tmux start
 set -g @claude-tabs-notify         'on'
