@@ -36,5 +36,7 @@ tmux 3.4), Fedora 44 (tmux 3.7c), Arch.
 
 It is safe on the host too: every tmux call goes to a dedicated socket
 (`-L claude-tabs-test`, override with `CLAUDE_TABS_TEST_SOCKET`), which the
-suite creates and kills itself. Set `REPO=$PWD` when running outside a
-container.
+suite creates and kills itself, and `TMUX_TMPDIR` is pointed at
+`/tmp/ct-tmuxdir`, so even the checks that call plain `tmux` (the uninstall
+ones) never reach the server you run it from. Set `REPO=$PWD` when running
+outside a container.

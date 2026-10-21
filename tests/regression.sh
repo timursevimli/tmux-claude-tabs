@@ -12,6 +12,10 @@ CLAUDE_TABS_TEST_SOCKET="${CLAUDE_TABS_TEST_SOCKET:-claude-tabs-test}"
 tmux() { command tmux -L "$CLAUDE_TABS_TEST_SOCKET" "$@"; }
 
 REPO="${REPO:-/repo}"          # container default; override to run on a host
+# Every tmux here, -L or default, lives under this dir. Without it the
+# `env -u TMUX ... install.sh --uninstall` checks reach the host default
+# server and uninstall the plugin from the tmux the suite is run from.
+export TMUX_TMPDIR=/tmp/ct-tmuxdir; mkdir -p "$TMUX_TMPDIR"
 export XDG_DATA_HOME=/tmp/xdg
 export CLAUDE_TABS_SUPERVISOR_DIR=/tmp/fakesup
 rm -rf /tmp/xdg /tmp/fakesup; mkdir -p /tmp/fakesup
